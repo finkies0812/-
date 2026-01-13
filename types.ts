@@ -10,14 +10,21 @@ export enum MatchType {
   MIXED_DOUBLES = '혼복'
 }
 
+export enum CourtType {
+  GRASS = '인잔',
+  HARD = '하드',
+  CLAY = '클레이'
+}
+
 export interface Member {
   id: string;
   name: string;
   gender: Gender;
   wins: number;
   losses: number;
+  draws: number;
   winRate: number;
-  points: number; // 승점 (승리: 3점, 무승부: 1점)
+  points: number;
 }
 
 export interface MatchResult {
@@ -25,9 +32,11 @@ export interface MatchResult {
   date: string;
   winnerIds: string[];
   loserIds: string[];
-  score: string; // "6-4" 형식으로 저장됨을 가정
+  score: string; 
   matchType: MatchType;
-  courtName?: string; // 경기장 이름 추가
+  courtType: CourtType; // 코트 종류 추가
+  courtName?: string;
+  isDraw?: boolean;
 }
 
 export type Tab = 'members' | 'matches' | 'register';

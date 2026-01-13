@@ -1,23 +1,12 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Member, Gender, MatchResult, MatchType } from '../types';
+import { Member, Gender, MatchResult, MatchType, CourtType } from '../types';
 
 interface Props {
   members: Member[];
   matches: MatchResult[];
 }
 
-interface MemberStats {
-  wins: number;
-  losses: number;
-  winRate: number;
-  pointsWon: number;
-  pointsLost: number;
-  totalGames: number;
-  points: number;
-}
-
-// 애니메이션 스타일 정의
 const animationStyles = `
   @keyframes highlightUpdate {
     0% { background-color: rgba(79, 70, 229, 0.2); }
@@ -26,6 +15,9 @@ const animationStyles = `
   .animate-update {
     animation: highlightUpdate 1s ease-out;
   }
+  .rank-1 { background: linear-gradient(135deg, #fde047 0%, #ca8a04 100%); color: white; }
+  .rank-2 { background: linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%); color: white; }
+  .rank-3 { background: linear-gradient(135deg, #ffedd5 0%, #d97706 100%); color: white; }
 `;
 
 const MemberManagement: React.FC<Props> = ({ members, matches }) => {
@@ -34,16 +26,14 @@ const MemberManagement: React.FC<Props> = ({ members, matches }) => {
   const prevMembersRef = useRef<Member[]>(members);
   const [updatedMemberIds, setUpdatedMemberIds] = useState<Set<string>>(new Set());
 
-  // 데이터 변경 감지 로직 (포인트나 승수가 변한 멤버 ID 추적)
   useEffect(() => {
     const newlyUpdated = new Set<string>();
     members.forEach(m => {
       const prev = prevMembersRef.current.find(p => p.id === m.id);
-      if (prev && (prev.points !== m.points || prev.wins !== m.wins)) {
+      if (prev && (prev.points !== m.points || prev.wins !== m.wins || prev.draws !== m.draws)) {
         newlyUpdated.add(m.id);
       }
     });
-
     if (newlyUpdated.size > 0) {
       setUpdatedMemberIds(newlyUpdated);
       const timer = setTimeout(() => setUpdatedMemberIds(new Set()), 1500);
@@ -69,10 +59,15 @@ const MemberManagement: React.FC<Props> = ({ members, matches }) => {
       .sort((a, b) => (b.points || 0) - (a.points || 0) || b.winRate - a.winRate || b.wins - a.wins);
   }, [members, activeGenderTab]);
 
-  const selectedMember = useMemo(() => 
-    members.find(m => m.id === selectedMemberId), 
-    [members, selectedMemberId]
-  );
+  const selectedMember = useMemo(() => members.find(m => m.id === selectedMemberId), [members, selectedMemberId]);
+  
+  const currentRank = useMemo(() => {
+    if (!selectedMember) return 0;
+    const sameGenderMembers = members
+      .filter(m => m.gender === selectedMember.gender)
+      .sort((a, b) => (b.points || 0) - (a.points || 0) || b.winRate - a.winRate || b.wins - a.wins);
+    return sameGenderMembers.findIndex(m => m.id === selectedMember.id) + 1;
+  }, [members, selectedMember]);
 
   const memberMatchHistory = useMemo(() => {
     if (!selectedMemberId) return [];
@@ -83,277 +78,264 @@ const MemberManagement: React.FC<Props> = ({ members, matches }) => {
 
   const detailStats = useMemo(() => {
     if (!selectedMemberId) return null;
-
-    const stats: Record<MatchType | 'total', MemberStats> = {
-      [MatchType.MALE_DOUBLES]: { wins: 0, losses: 0, winRate: 0, pointsWon: 0, pointsLost: 0, totalGames: 0, points: 0 },
-      [MatchType.FEMALE_DOUBLES]: { wins: 0, losses: 0, winRate: 0, pointsWon: 0, pointsLost: 0, totalGames: 0, points: 0 },
-      [MatchType.MIXED_DOUBLES]: { wins: 0, losses: 0, winRate: 0, pointsWon: 0, pointsLost: 0, totalGames: 0, points: 0 },
-      total: { wins: 0, losses: 0, winRate: 0, pointsWon: 0, pointsLost: 0, totalGames: 0, points: 0 }
+    
+    const stats: any = {
+      total: { wins: 0, losses: 0, draws: 0, total: 0, points: 0, winRate: 0 },
+      byType: {
+        [MatchType.MALE_DOUBLES]: { wins: 0, total: 0 },
+        [MatchType.FEMALE_DOUBLES]: { wins: 0, total: 0 },
+        [MatchType.MIXED_DOUBLES]: { wins: 0, total: 0 }
+      },
+      byCourt: {
+        [CourtType.GRASS]: { wins: 0, total: 0 },
+        [CourtType.HARD]: { wins: 0, total: 0 },
+        [CourtType.CLAY]: { wins: 0, total: 0 }
+      }
     };
 
     memberMatchHistory.forEach(match => {
       const isWinner = match.winnerIds.includes(selectedMemberId);
-      const scores = match.score.split('-').map(s => parseInt(s.trim()) || 0);
-      const winScore = Math.max(...scores);
-      const loseScore = Math.min(...scores);
-      const type = match.matchType;
-
-      stats[type].totalGames += 1;
-      stats.total.totalGames += 1;
-
-      if (isWinner) {
-        stats[type].wins += 1;
-        stats[type].points += 3;
-        stats[type].pointsWon += winScore;
-        stats[type].pointsLost += loseScore;
+      stats.total.total += 1;
+      
+      if (match.isDraw) {
+        stats.total.draws += 1;
+        stats.total.points += 1;
+      } else if (isWinner) {
         stats.total.wins += 1;
         stats.total.points += 3;
-        stats.total.pointsWon += winScore;
-        stats.total.pointsLost += loseScore;
       } else {
-        stats[type].losses += 1;
-        stats[type].pointsWon += loseScore;
-        stats[type].pointsLost += winScore;
         stats.total.losses += 1;
-        stats.total.pointsWon += loseScore;
-        stats.total.pointsLost += winScore;
+      }
+
+      if (!match.isDraw) {
+        stats.byType[match.matchType].total += 1;
+        if (isWinner) stats.byType[match.matchType].wins += 1;
+        
+        stats.byCourt[match.courtType].total += 1;
+        if (isWinner) stats.byCourt[match.courtType].wins += 1;
       }
     });
 
-    [MatchType.MALE_DOUBLES, MatchType.FEMALE_DOUBLES, MatchType.MIXED_DOUBLES, 'total'].forEach((key) => {
-      const k = key as MatchType | 'total';
-      const total = stats[k].wins + stats[k].losses;
-      stats[k].winRate = total > 0 ? (stats[k].wins / total) * 100 : 0;
-    });
-
+    stats.total.winRate = stats.total.total > 0 ? (stats.total.wins / stats.total.total) * 100 : 0;
     return stats;
   }, [memberMatchHistory, selectedMemberId]);
 
   const getMemberName = (id: string) => members.find(m => m.id === id)?.name || '알수없음';
 
+  const isFemale = activeGenderTab === Gender.FEMALE;
+
   return (
-    <div className="space-y-4 animate-fadeIn">
+    <div className="space-y-4 animate-fadeIn max-w-full overflow-hidden">
       <style>{animationStyles}</style>
+      
       <div className="flex items-center justify-between px-1">
-        <h2 className="text-2xl font-bold flex items-center gap-2 text-slate-800">
-          <span className="w-1.5 h-7 bg-indigo-600 rounded-full"></span>
+        <h2 className="text-2xl font-black flex items-center gap-2 text-slate-800">
+          <span className={`w-1.5 h-7 rounded-full ${isFemale ? 'bg-pink-500' : 'bg-indigo-600'}`}></span>
           실시간 랭킹
         </h2>
-        <div className="flex items-center gap-2">
-           <span className="flex h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
-           <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Live Updates</p>
-        </div>
       </div>
 
-      <section className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="flex border-b border-slate-100">
-          <button 
-            onClick={() => setActiveGenderTab(Gender.MALE)}
-            className={`flex-1 py-4 text-base font-bold transition-all relative ${activeGenderTab === Gender.MALE ? 'text-indigo-600 bg-indigo-50/30' : 'text-slate-400'}`}
-          >
-            남성부
-            {activeGenderTab === Gender.MALE && <div className="absolute bottom-0 left-0 right-0 h-1 bg-indigo-600"></div>}
-          </button>
-          <button 
-            onClick={() => setActiveGenderTab(Gender.FEMALE)}
-            className={`flex-1 py-4 text-base font-bold transition-all relative ${activeGenderTab === Gender.FEMALE ? 'text-indigo-600 bg-indigo-50/30' : 'text-slate-400'}`}
-          >
-            여성부
-            {activeGenderTab === Gender.FEMALE && <div className="absolute bottom-0 left-0 right-0 h-1 bg-indigo-600"></div>}
-          </button>
+      <section className={`bg-white rounded-[1.5rem] shadow-sm border overflow-hidden ${isFemale ? 'border-pink-100' : 'border-slate-100'}`}>
+        <div className="flex border-b border-slate-50">
+          <button onClick={() => setActiveGenderTab(Gender.MALE)} className={`flex-1 py-4 text-lg font-black relative ${activeGenderTab === Gender.MALE ? 'text-indigo-600 bg-indigo-50/30' : 'text-slate-400'}`}>남성부 {activeGenderTab === Gender.MALE && <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-indigo-600"></div>}</button>
+          <button onClick={() => setActiveGenderTab(Gender.FEMALE)} className={`flex-1 py-4 text-lg font-black relative ${activeGenderTab === Gender.FEMALE ? 'text-pink-600 bg-pink-50/30' : 'text-slate-400'}`}>여성부 {activeGenderTab === Gender.FEMALE && <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-pink-500"></div>}</button>
         </div>
-
-        <div className="overflow-hidden">
-          <table className="w-full text-left table-fixed">
-            <thead className="bg-slate-50 text-slate-500 text-[13px] uppercase font-bold border-b border-slate-100">
+        <div className="w-full overflow-x-auto">
+          <table className="w-full text-left table-fixed border-collapse min-w-[320px]">
+            <thead className={`${isFemale ? 'bg-pink-50/30' : 'bg-slate-50/50'} text-[10px] uppercase font-black border-b border-slate-100 text-slate-900`}>
               <tr>
-                <th className="w-10 px-1 py-4 text-center">순위</th>
-                <th className="px-2 py-4">이름</th>
-                <th className="w-12 px-1 py-4 text-center">경기</th>
-                <th className="w-10 px-1 py-4 text-center">승</th>
-                <th className="w-10 px-1 py-4 text-center">패</th>
-                <th className="w-16 px-1 py-4 text-center">승률</th>
-                <th className="w-16 px-2 py-4 text-center">포인트</th>
+                <th className="w-[8%] px-0.5 py-3 text-center">#</th>
+                <th className="w-[28%] px-4 py-3">이름</th>
+                <th className="w-[11%] px-0 py-3 text-center">경기</th>
+                <th className="w-[8%] px-0 py-3 text-center">승</th>
+                <th className="w-[8%] px-0 py-3 text-center">무</th>
+                <th className="w-[8%] px-0 py-3 text-center">패</th>
+                <th className="w-[12%] px-0 py-3 text-center">승률</th>
+                <th className="w-[17%] px-1 py-3 text-center">점수</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredMembers.length > 0 ? (
-                filteredMembers.map((member, index) => (
-                  <tr 
-                    key={member.id} 
-                    className={`hover:bg-indigo-50/20 transition-colors ${updatedMemberIds.has(member.id) ? 'animate-update' : ''}`}
-                  >
-                    <td className="px-1 py-4 text-center">
-                      <span className={`inline-flex w-6 h-6 items-center justify-center rounded-full font-bold text-xs ${
-                        index === 0 ? 'bg-yellow-100 text-yellow-700' : 
-                        index === 1 ? 'bg-slate-200 text-slate-700' :
-                        index === 2 ? 'bg-orange-100 text-orange-700' :
-                        'text-slate-400'
-                      }`}>
-                        {index + 1}
-                      </span>
-                    </td>
-                    <td className="px-2 py-4 font-bold text-slate-700 truncate">
-                      <button 
-                        onClick={() => setSelectedMemberId(member.id)}
-                        className="hover:text-indigo-600 hover:underline decoration-indigo-300 underline-offset-4 text-[15px] text-left truncate w-full transition-all"
-                      >
-                        {member.name}
-                      </button>
-                    </td>
-                    <td className="px-1 py-4 text-center font-bold text-slate-500 text-[13px]">
-                      {memberTotalGamesMap[member.id] || 0}
-                    </td>
-                    <td className="px-1 py-4 text-center text-blue-600 font-bold text-[13px]">{member.wins}</td>
-                    <td className="px-1 py-4 text-center text-red-500 font-bold text-[13px]">{member.losses}</td>
-                    <td className="px-1 py-4 text-center">
-                      <span className="text-[13px] font-black text-indigo-700">
-                        {member.winRate.toFixed(0)}%
-                      </span>
-                    </td>
-                    <td className="px-2 py-4 text-center">
-                      <span className={`px-2 py-1 bg-indigo-600 text-white rounded-lg text-[13px] font-black transition-transform ${updatedMemberIds.has(member.id) ? 'scale-110' : ''}`}>
-                        {member.points || 0}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-slate-400 text-base font-medium">
-                    회원이 없습니다.
+              {filteredMembers.map((member, index) => (
+                <tr key={member.id} className={`transition-colors active:bg-slate-50 ${updatedMemberIds.has(member.id) ? 'animate-update' : ''}`}>
+                  <td className="px-0.5 py-3.5 text-center">
+                    <span className={`inline-flex w-7 h-7 items-center justify-center rounded-full font-black text-[13px] ${index === 0 ? 'rank-1 shadow-md shadow-amber-200' : index === 1 ? 'rank-2 shadow-md shadow-slate-200' : index === 2 ? 'rank-3 shadow-md shadow-amber-100' : 'text-slate-400 bg-slate-50'}`}>{index + 1}</span>
+                  </td>
+                  <td className="px-4 py-3.5">
+                    <button onClick={() => setSelectedMemberId(member.id)} className="truncate w-full text-[17px] font-black text-left text-slate-800 tracking-tight">{member.name}</button>
+                  </td>
+                  <td className="px-0 py-3.5 text-center font-bold text-slate-400 text-[14px]">{memberTotalGamesMap[member.id] || 0}</td>
+                  <td className="px-0 py-3.5 text-center font-black text-[16px] text-blue-600">{member.wins}</td>
+                  <td className="px-0 py-3.5 text-center font-bold text-slate-400 text-[14px]">{member.draws || 0}</td>
+                  <td className="px-0 py-3.5 text-center text-red-400 font-bold text-[14px]">{member.losses}</td>
+                  <td className="px-0 py-3.5 text-center">
+                    <span className="text-slate-800 font-black text-[14px]">{member.winRate.toFixed(0)}%</span>
+                  </td>
+                  <td className="px-1 py-3.5 text-center">
+                    <span className={`inline-block px-3 py-1 rounded-xl font-black text-[16px] shadow-sm ${isFemale ? 'bg-pink-500 text-white shadow-pink-100' : 'bg-indigo-600 text-white shadow-indigo-100'}`}>
+                      {member.points || 0}
+                    </span>
                   </td>
                 </tr>
-              )}
+              ))}
             </tbody>
           </table>
         </div>
       </section>
 
-      {/* 상세 정보 모달 */}
+      {/* Member Report Modal */}
       {selectedMember && detailStats && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col animate-slideUp">
-            <div className="bg-indigo-600 p-6 text-white flex justify-between items-center shrink-0">
-              <div>
-                <h3 className="text-2xl font-bold">{selectedMember.name} 님의 기록</h3>
-                <p className="text-indigo-100 text-sm opacity-80">{selectedMember.gender === Gender.MALE ? '남성' : '여성'} 회원</p>
+        <div className="fixed inset-0 z-[100] flex flex-col justify-end bg-slate-900/80 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-t-[2.5rem] w-full max-h-[95vh] overflow-hidden flex flex-col animate-slideUp shadow-2xl">
+            
+            <div className={`${selectedMember.gender === Gender.FEMALE ? 'bg-pink-600' : 'bg-indigo-600'} px-6 pt-8 pb-6 text-white shrink-0`}>
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="text-2xl font-black mb-1">{selectedMember.name} 리포트</h3>
+                  <p className="text-[10px] opacity-70 font-bold uppercase tracking-widest">ACE TENNIS ANALYTICS</p>
+                </div>
+                <button onClick={() => setSelectedMemberId(null)} className="bg-white/10 p-2 rounded-full active:scale-90 transition-transform">
+                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
               </div>
-              <button onClick={() => setSelectedMemberId(null)} className="text-white/80 hover:text-white text-3xl focus:outline-none">&times;</button>
             </div>
-
-            <div className="p-5 overflow-y-auto space-y-6">
-              <div className="grid grid-cols-5 gap-2">
-                <div className="bg-slate-50 p-2 rounded-xl text-center">
-                  <p className="text-[9px] text-slate-500 font-bold mb-1 uppercase">경기</p>
-                  <p className="text-lg font-black text-slate-800">{detailStats.total.totalGames}</p>
+            
+            <div className="flex-1 overflow-y-auto px-5 py-6 space-y-6 pb-12">
+              {/* Summary Score Card */}
+              <div className="bg-slate-50 rounded-[2rem] p-4 flex items-center justify-between border border-slate-100">
+                <div className="flex flex-col items-center flex-1 border-r border-slate-200">
+                  <span className="text-[10px] font-black text-slate-400 uppercase mb-1">순위</span>
+                  <span className="text-2xl font-black text-slate-800">#{currentRank}</span>
                 </div>
-                <div className="bg-indigo-50 p-2 rounded-xl text-center">
-                  <p className="text-[9px] text-indigo-500 font-bold mb-1 uppercase">승률</p>
-                  <p className="text-lg font-black text-indigo-600">{detailStats.total.winRate.toFixed(0)}%</p>
+                <div className="flex flex-col items-center flex-1 border-r border-slate-200">
+                  <span className="text-[10px] font-black text-slate-400 uppercase mb-1">승률</span>
+                  <span className={`text-2xl font-black ${selectedMember.gender === Gender.FEMALE ? 'text-pink-600' : 'text-indigo-600'}`}>{detailStats.total.winRate.toFixed(0)}%</span>
                 </div>
-                <div className="bg-blue-50 p-2 rounded-xl text-center">
-                  <p className="text-[9px] text-blue-600 font-bold mb-1 uppercase">승</p>
-                  <p className="text-lg font-black text-blue-700">{detailStats.total.wins}</p>
-                </div>
-                <div className="bg-red-50 p-2 rounded-xl text-center">
-                  <p className="text-[9px] text-red-500 font-bold mb-1 uppercase">패</p>
-                  <p className="text-lg font-black text-red-700">{detailStats.total.losses}</p>
-                </div>
-                <div className="bg-amber-50 p-2 rounded-xl text-center border border-amber-100">
-                  <p className="text-[9px] text-amber-600 font-bold mb-1 uppercase">포인트</p>
-                  <p className="text-lg font-black text-amber-700">{detailStats.total.points}</p>
+                <div className="flex flex-col items-center flex-1">
+                  <span className="text-[10px] font-black text-slate-400 uppercase mb-1">포인트</span>
+                  <span className="text-2xl font-black text-slate-800">{selectedMember.points || 0}</span>
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">종목별 상세</h4>
-                <div className="overflow-hidden border border-slate-100 rounded-xl">
-                  <table className="w-full text-sm">
-                    <thead className="bg-slate-50 text-slate-400 font-bold uppercase text-[10px]">
+              {/* Analysis Tables Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-3">
+                  <h4 className="text-[11px] font-black text-slate-400 uppercase px-2 tracking-widest">경기 방식 분석</h4>
+                  <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 text-[10px] font-black text-slate-400 border-b border-slate-100">
+                        <tr>
+                          <th className="py-2.5 px-3 text-left">구분</th>
+                          <th className="py-2.5 px-3 text-center">전적(승/계)</th>
+                          <th className="py-2.5 px-3 text-right">승률</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {selectedMember.gender === Gender.MALE && (
+                          <tr className="hover:bg-slate-50/50 transition-colors">
+                            <td className="py-3 px-3 font-bold text-slate-700">남복</td>
+                            <td className="py-3 px-3 text-center text-slate-500 font-medium">{detailStats.byType[MatchType.MALE_DOUBLES].wins} / {detailStats.byType[MatchType.MALE_DOUBLES].total}</td>
+                            <td className="py-3 px-3 text-right font-black text-indigo-600">{detailStats.byType[MatchType.MALE_DOUBLES].total > 0 ? ((detailStats.byType[MatchType.MALE_DOUBLES].wins / detailStats.byType[MatchType.MALE_DOUBLES].total) * 100).toFixed(0) : 0}%</td>
+                          </tr>
+                        )}
+                        {selectedMember.gender === Gender.FEMALE && (
+                          <tr className="hover:bg-slate-50/50 transition-colors">
+                            <td className="py-3 px-3 font-bold text-slate-700">여복</td>
+                            <td className="py-3 px-3 text-center text-slate-500 font-medium">{detailStats.byType[MatchType.FEMALE_DOUBLES].wins} / {detailStats.byType[MatchType.FEMALE_DOUBLES].total}</td>
+                            <td className="py-3 px-3 text-right font-black text-pink-600">{detailStats.byType[MatchType.FEMALE_DOUBLES].total > 0 ? ((detailStats.byType[MatchType.FEMALE_DOUBLES].wins / detailStats.byType[MatchType.FEMALE_DOUBLES].total) * 100).toFixed(0) : 0}%</td>
+                          </tr>
+                        )}
+                        <tr className="hover:bg-slate-50/50 transition-colors">
+                          <td className="py-3 px-3 font-bold text-slate-700">혼복</td>
+                          <td className="py-3 px-3 text-center text-slate-500 font-medium">{detailStats.byType[MatchType.MIXED_DOUBLES].wins} / {detailStats.byType[MatchType.MIXED_DOUBLES].total}</td>
+                          <td className="py-3 px-3 text-right font-black text-slate-800">{detailStats.byType[MatchType.MIXED_DOUBLES].total > 0 ? ((detailStats.byType[MatchType.MIXED_DOUBLES].wins / detailStats.byType[MatchType.MIXED_DOUBLES].total) * 100).toFixed(0) : 0}%</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <h4 className="text-[11px] font-black text-slate-400 uppercase px-2 tracking-widest">코트 종류 분석</h4>
+                  <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 text-[10px] font-black text-slate-400 border-b border-slate-100">
+                        <tr>
+                          <th className="py-2.5 px-3 text-left">코트</th>
+                          <th className="py-2.5 px-3 text-center">전적(승/계)</th>
+                          <th className="py-2.5 px-3 text-right">승률</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {[
+                          { key: CourtType.GRASS, label: '인잔', color: 'text-emerald-600' },
+                          { key: CourtType.HARD, label: '하드', color: 'text-blue-500' },
+                          { key: CourtType.CLAY, label: '클레이', color: 'text-orange-600' }
+                        ].map(court => (
+                          <tr key={court.key} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="py-3 px-3 font-bold text-slate-700">{court.label}</td>
+                            <td className="py-3 px-3 text-center text-slate-500 font-medium">{detailStats.byCourt[court.key].wins} / {detailStats.byCourt[court.key].total}</td>
+                            <td className={`py-3 px-3 text-right font-black ${court.color}`}>{detailStats.byCourt[court.key].total > 0 ? ((detailStats.byCourt[court.key].wins / detailStats.byCourt[court.key].total) * 100).toFixed(0) : 0}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              {/* Recent Matches History Table (Optimized for 10 matches) */}
+              <div className="space-y-3">
+                <h4 className="text-[11px] font-black text-slate-400 uppercase px-2 tracking-widest">최근 전적 히스토리 (최신 10경기)</h4>
+                <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+                  <table className="w-full text-xs text-center border-collapse table-fixed">
+                    <thead className="bg-slate-50 text-[9px] font-black text-slate-400 border-b border-slate-100">
                       <tr>
-                        <th className="px-3 py-2 text-left">종목</th>
-                        <th className="px-2 py-2 text-center">승-패</th>
-                        <th className="px-2 py-2 text-center">포인트</th>
-                        <th className="px-2 py-2 text-center">득/실</th>
+                        <th className="py-2 px-1 w-[12%]">결과</th>
+                        <th className="py-2 px-1 w-[35%]">내 팀</th>
+                        <th className="py-2 px-1 w-[18%]">스코어</th>
+                        <th className="py-2 px-1 w-[35%]">상대 팀</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
-                      {[MatchType.MALE_DOUBLES, MatchType.FEMALE_DOUBLES, MatchType.MIXED_DOUBLES].map((type) => (
-                        <tr key={type} className="hover:bg-slate-50">
-                          <td className="px-3 py-3 font-bold text-slate-700">{type}</td>
-                          <td className="px-2 py-3 text-center font-bold">
-                            <span className="text-blue-600">{detailStats[type].wins}</span>
-                            <span className="mx-1 text-slate-200">-</span>
-                            <span className="text-red-500">{detailStats[type].losses}</span>
-                          </td>
-                          <td className="px-2 py-3 text-center">
-                            <span className="font-black text-indigo-600">{detailStats[type].points}</span>
-                          </td>
-                          <td className="px-2 py-3 text-center text-slate-400 font-medium text-[12px]">
-                            {detailStats[type].pointsWon}/{detailStats[type].pointsLost}
-                          </td>
-                        </tr>
-                      ))}
+                      {memberMatchHistory.slice(0, 10).map((m) => {
+                        const isWinner = m.winnerIds.includes(selectedMemberId);
+                        const partnerIds = (isWinner ? m.winnerIds : m.loserIds).filter(id => id !== selectedMemberId);
+                        const opponentIds = isWinner ? m.loserIds : m.winnerIds;
+                        return (
+                          <tr key={m.id} className="active:bg-slate-50 hover:bg-slate-50/30 transition-colors">
+                            <td className="py-3 px-1">
+                              <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-black ${m.isDraw ? 'bg-slate-100 text-slate-500' : isWinner ? 'bg-blue-600 text-white' : 'bg-red-500 text-white'}`}>
+                                {m.isDraw ? '무' : isWinner ? '승' : '패'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-1 text-[11px]">
+                              <div className="flex flex-col leading-tight justify-center items-center">
+                                <span className="font-black text-slate-900 truncate w-full">{selectedMember.name}</span>
+                                {partnerIds.map(id => <span key={id} className="font-black text-slate-900 truncate w-full">{getMemberName(id)}</span>)}
+                              </div>
+                            </td>
+                            <td className="py-3 px-1">
+                              <span className="font-black text-[12px] text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-100">{m.score}</span>
+                            </td>
+                            <td className="py-3 px-1 text-[11px]">
+                              <div className="flex flex-col leading-tight justify-center items-center">
+                                {opponentIds.map(id => <span key={id} className="font-black text-slate-900 truncate w-full">{getMemberName(id)}</span>)}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
-                </div>
-              </div>
-
-              <div className="space-y-2 pb-4">
-                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest px-1 flex justify-between">
-                  <span>최근 경기 기록</span>
-                  <span>{memberMatchHistory.length}건</span>
-                </h4>
-                <div className="space-y-2">
-                  {memberMatchHistory.length > 0 ? (
-                    memberMatchHistory.map((match) => {
-                      const isWinner = match.winnerIds.includes(selectedMemberId);
-                      return (
-                        <div key={match.id} className="bg-slate-50 rounded-xl p-4 border border-slate-100 flex flex-col gap-2">
-                          <div className="flex justify-between items-center">
-                            <span className="text-[11px] font-bold text-slate-400">{match.date}</span>
-                            <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase ${isWinner ? 'bg-blue-600 text-white' : 'bg-red-500 text-white'}`}>
-                              {isWinner ? 'WIN (+3pts)' : 'LOSS'}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <div className="flex-1 text-xs space-y-0.5">
-                              <p className="text-slate-400 font-medium">함께한 팀</p>
-                              <p className="font-bold text-slate-700">
-                                {isWinner 
-                                  ? match.winnerIds.filter(id => id !== selectedMemberId).map(id => getMemberName(id)).join(', ') || '단식/없음'
-                                  : match.loserIds.filter(id => id !== selectedMemberId).map(id => getMemberName(id)).join(', ') || '단식/없음'}
-                              </p>
-                            </div>
-                            <div className="px-4 text-center">
-                              <span className="text-lg font-black text-slate-800">{match.score}</span>
-                              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-tighter">{match.matchType}</p>
-                            </div>
-                            <div className="flex-1 text-right text-xs space-y-0.5">
-                              <p className="text-slate-400 font-medium">상대 팀</p>
-                              <p className="font-bold text-slate-500">
-                                {isWinner 
-                                  ? match.loserIds.map(id => getMemberName(id)).join(', ') 
-                                  : match.winnerIds.map(id => getMemberName(id)).join(', ')}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <div className="py-10 text-center text-slate-300 italic text-sm">경기 기록이 없습니다.</div>
+                  {memberMatchHistory.length === 0 && (
+                    <div className="py-10 text-center text-slate-300 font-bold text-xs">경기 데이터가 없습니다.</div>
                   )}
                 </div>
               </div>
             </div>
-
-            <div className="p-4 bg-slate-50 border-t border-slate-100 shrink-0">
-              <button 
-                onClick={() => setSelectedMemberId(null)}
-                className="w-full py-4 bg-slate-800 text-white rounded-xl font-bold text-base shadow-lg active:scale-95 transition-transform"
-              >
+            
+            <div className="p-5 border-t border-slate-50 bg-white shrink-0 pb-8">
+              <button onClick={() => setSelectedMemberId(null)} className={`w-full py-4 rounded-2xl font-black text-lg text-white shadow-xl ${selectedMember.gender === Gender.FEMALE ? 'bg-pink-600' : 'bg-indigo-600'} active:scale-95 transition-all`}>
                 닫기
               </button>
             </div>
