@@ -1,0 +1,5 @@
+{
+  "name": "Tennis Club Manager",
+  "description": "A comprehensive tennis club management application with real-time ranking, gender-based member organization, and automated match result processing.",
+  "requestFramePermissions": []
+}
